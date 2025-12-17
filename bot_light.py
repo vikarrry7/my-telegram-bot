@@ -1,35 +1,26 @@
 import time
 import requests
-import spacy
 import random
 from datetime import datetime, timedelta
 import re
 import wikipedia
 import logging
 import os
-import json
 import base64
 from pathlib import Path
 from telegram import Update
-from telegram.ext import Updater, CommandHandler, MessageHandler, Filters
+from telegram.ext import Application, CommandHandler, MessageHandler, filters
 from telegram.ext import CallbackContext
 import tempfile
 
-TELEGRAM_TOKEN = "8230051824:AAH8k81yxhlUNTO-th6SoNMXbXwENYdlmao"  # Токен вашего бота
-CLARIFAI_API_KEY = "d10ada4daed04f01abd76e8f8d88b381"  # Опционально, для анализа фото
+TELEGRAM_TOKEN = "8230051824:AAH8k81yxhlUNTO-th6SoNMXbXwENYdlmao"  
+CLARIFAI_API_KEY = "d10ada4daed04f01abd76e8f8d88b381"  
 
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO
 )
 logger = logging.getLogger(__name__)
-
-try:
-    nlp = spacy.load("en_core_web_sm")
-    print(" Модель spaCy загружена")
-except:
-    print("  Не удалось загрузить модель spaCy, используем базовую")
-    nlp = spacy.blank("en")
 
 # Меню пиццерии
 PIZZA_MENU = {
@@ -83,35 +74,18 @@ DRINK_MENU = {
 }
 
 # База знаний для энциклопедии
-RUSSIAN_TO_ENGLISH = {
-    'хомяк': 'hamster', 'хомяки': 'hamsters',
-    'ёжик': 'hedgehog', 'ежик': 'hedgehog', 'ежики': 'hedgehogs',
-    'собака': 'dog', 'собаки': 'dogs',
-    'кошка': 'cat', 'кошки': 'cats', 'кот': 'cat',
-    'слон': 'elephant', 'слоны': 'elephants',
-    'дельфин': 'dolphin', 'дельфины': 'dolphins',
-    'лев': 'lion', 'львы': 'lions',
-    'тигр': 'tiger', 'тигры': 'tigers',
-    'птица': 'bird', 'птицы': 'birds',
-    'рыба': 'fish',
-    'черепаха': 'turtle', 'черепахи': 'turtles',
-    'млекопитающее': 'mammal', 'млекопитающие': 'mammals',
-    'ии': 'artificial intelligence',
-    'искусственный интеллект': 'artificial intelligence',
-}
-
 RUSSIAN_DESCRIPTIONS = {
-    'hamster': "Хомяк — небольшое млекопитающее из подсемейства хомяковых. Известны своими защечными мешками, в которых переносят пищу. Популярны в качестве домашних питомцев. Наиболее распространенный вид — сирийский хомяк. Активны в основном ночью.",
-    'hedgehog': "Ёжик (лат. Erinaceus) — млекопитающее из семейства ежовых. Известны своими иголки, которые на самом деле являются видоизмененными волосами. Питаются насекомыми, червями, иногда мелкими позвоночными и фруктами. Активны в основном ночью, на зиму впадают в спячку.",
-    'dog': "Собака (лат. Canis lupus familiaris) — домашнее животное, одно из наиболее популярных животных-компаньонов. Первое одомашненное животное, был одомашнен примерно 15 000 лет назад. Существует множество пород собак, которые различаются по размерам, масти, сложению и поведение.",
-    'cat': "Кошка (лат. Felis catus) — домашнее животное, одно из наиболее популярных «животных-компаньонов». Была одомашнена около 10 000 лет назад на Ближнем Востоке. Кошки являются хищниками и сохранили многие черты своих диких предков.",
-    'elephant': "Слон — самое крупное современное наземное животное. Отличается хоботом, бивнями и большими ушами. Существует три вида слонов: африканский саванный слон, африканский лесной слон и азиатский слон. Слоны живут семейными группами во главе со старшей самкой.",
-    'dolphin': "Дельфины — морские млекопитающие из отряда китообразных. Известны своим высоким интеллектом, игривым поведением и способностью к эхолокации. Спят дельфины особым образом: у них спит только одно полушарие мозга, чтобы они могли продолжать дышать и контролировать свое положение в воде.",
-    'lion': "Лев (лат. Panthera leo) — хищное млекопитающее рода пантер. Второй по величине после тигра представитель семейства кошачьих в мире. Единственные кошачьи, живущие в прайдах. Самцы отличаются гривой.",
-    'tiger': "Тигр (лат. Panthera tigris) — самый крупный и один из самых узнаваемых видов кошачьих. Отличается яркой оранжевой шерстью с черными полосами. Находится под угрозом исчезновения. Обитает в Азии.",
-    'mammal': "Млекопитающие — класс позвоночных животных, основной отличительной особенностью которых является вскармливание детёнышей молоком. Другие характерные черты: волосяной покров, теплокровность, наличие диафрагмы и развитой коры головного мозга.",
-    'artificial intelligence': "Искусственный интеллект (ИИ) — это технология создания компьютерных систем, способных выполнять задачи, требующие человеческого интеллекта: распознавание образов, принятие решений, обучение, понимание естественного языка. ИИ используется в медицине, транспорте, финансах и многих других областях.",
-    'question mark': "Вопросительный знак (?) — знак препинания, ставится обычно в конце предложения для выражения вопроса или сомнения. Встречается в печатных книгах с XVI века, однако для выражения вопроса он закрепляется значительно позже, лишь в XVIII веке.",
+    'хомяк': "Хомяк — небольшое млекопитающее из подсемейства хомяковых. Известны своими защечными мешками, в которых переносят пищу. Популярны в качестве домашних питомцев. Наиболее распространенный вид — сирийский хомяк. Активны в основном ночью.",
+    'ежик': "Ёжик (лат. Erinaceus) — млекопитающее из семейства ежовых. Известны своими иголки, которые на самом деле являются видоизмененными волосами. Питаются насекомыми, червями, иногда мелкими позвоночными и фруктами. Активны в основном ночью, на зиму впадают в спячку.",
+    'собака': "Собака (лат. Canis lupus familiaris) — домашнее животное, одно из наиболее популярных животных-компаньонов. Первое одомашненное животное, был одомашнен примерно 15 000 лет назад. Существует множество пород собак, которые различаются по размерам, масти, сложению и поведение.",
+    'кошка': "Кошка (лат. Felis catus) — домашнее животное, одно из наиболее популярных «животных-компаньонов». Была одомашнена около 10 000 лет назад на Ближнем Востоке. Кошки являются хищниками и сохранили многие черты своих диких предков.",
+    'слон': "Слон — самое крупное современное наземное животное. Отличается хоботом, бивнями и большими ушами. Существует три вида слонов: африканский саванный слон, африканский лесной слон и азиатский слон. Слоны живут семейными группами во главе со старшей самкой.",
+    'дельфин': "Дельфины — морские млекопитающие из отряда китообразных. Известны своим высоким интеллектом, игривым поведением и способностью к эхолокации. Спят дельфины особым образом: у них спит только одно полушарие мозга, чтобы они могли продолжать дышать и контролировать свое положение в воде.",
+    'лев': "Лев (лат. Panthera leo) — хищное млекопитающее рода пантер. Второй по величине после тигра представитель семейства кошачьих в мире. Единственные кошачьи, живущие в прайдах. Самцы отличаются гривой.",
+    'тигр': "Тигр (лат. Panthera tigris) — самый крупный и один из самых узнаваемых видов кошачьих. Отличается яркой оранжевой шерстью с черными полосами. Находится под угрозом исчезновения. Обитает в Азии.",
+    'млекопитающее': "Млекопитающие — класс позвоночных животных, основной отличительной особенностью которых является вскармливание детёнышей молоком. Другие характерные черты: волосяной покров, теплокровность, наличие диафрагмы и развитой коры головного мозга.",
+    'ии': "Искусственный интеллект (ИИ) — это технология создания компьютерных систем, способных выполнять задачи, требующие человеческого интеллекта: распознавание образов, принятие решений, обучение, понимание естественного языка. ИИ используется в медицине, транспорте, финансах и многих других областях.",
+    'вопросительный знак': "Вопросительный знак (?) — знак препинания, ставится обычно в конце предложения для выражения вопроса или сомнения. Встречается в печатных книгах с XVI века, однако для выражения вопроса он закрепляется значительно позже, лишь в XVIII веке.",
 }
 
 # Глобальные переменные состояний
@@ -120,68 +94,40 @@ user_data = {}
 user_context = {}
 
 
-def extract_intent_improved(doc):
-    """Определяет намерение пользователя"""
-    text_lower = doc.text.lower()
+def extract_intent_simple(text):
+    """Упрощенное определение намерения пользователя (без spaCy)"""
+    text_lower = text.lower()
     
-    hungry_phrases = ['голоден', 'голодна', 'хочу есть', 'проголодался', 'проголодалась', 
-                     'hungry', 'i\'m hungry', 'want to eat', 'starving', 'i could eat']
+    # Проверка голода
+    hungry_words = ['голоден', 'голодна', 'хочу есть', 'проголодался', 'проголодалась', 
+                   'hungry', "i'm hungry", 'want to eat', 'starving']
+    if any(word in text_lower for word in hungry_words):
+        return 'hungry'
     
+    # Проверка напитков
     drink_keywords = ['cola', 'pepsi', 'fanta', 'sprite', 'water', 'juice', 'tea', 'coffee',
-                     'кола', 'пепси', 'фанта', 'спрайт', 'вода', 'сок', 'чай', 'кофе', 'напиток', 'напитки']
+                     'кола', 'пепси', 'фанта', 'спрайт', 'вода', 'сок', 'чай', 'кофе']
+    for drink in drink_keywords:
+        if drink in text_lower:
+            return f'order_{drink}'
     
-    want_words = ['хочу', 'давай', 'можно', 'дайте', 'дай', 'закажи', 'закажите', 
-                 'want', 'order', 'give me', 'get me', 'i\'d like']
+    # Проверка пиццы
+    pizza_keywords = ['pizza', 'пицц', 'пиццу', 'пицца']
+    if any(word in text_lower for word in pizza_keywords):
+        return 'orderPizza'
     
-    for phrase in hungry_phrases:
-        if phrase in text_lower:
-            return 'hungry'
-    
-    for drink_keyword in drink_keywords:
-        if drink_keyword in text_lower:
-            for want_word in want_words:
-                if want_word in text_lower:
-                    return f'order_{drink_keyword}'
-            return f'order_{drink_keyword}'
-    
-    pizza_keywords = ['pizza', 'пицц', 'пиццу', 'пицца', 'пиццы']
-    for pizza_keyword in pizza_keywords:
-        if pizza_keyword in text_lower:
-            for want_word in want_words:
-                if want_word in text_lower:
-                    return 'orderPizza'
-            return 'showPizza'
-    
+    # Проверка десертов
     dessert_keywords = ['dessert', 'десерт', 'сладкое', 'мороженое', 'чизкейк', 'тирамису']
-    for dessert_keyword in dessert_keywords:
-        if dessert_keyword in text_lower:
-            for want_word in want_words:
-                if want_word in text_lower:
-                    return 'orderDessert'
-            return 'showDesserts'
+    if any(word in text_lower for word in dessert_keywords):
+        return 'orderDessert'
     
-    topping_keywords = ['topping', 'добавка', 'топпинг', 'сыр', 'грибы', 'оливки', 'перец', 'бекон']
-    for topping_keyword in topping_keywords:
-        if topping_keyword in text_lower and any(word in text_lower for word in ['добавь', 'добавить', 'with', 'с']):
-            return 'addTopping'
+    # Проверка топпингов
+    topping_keywords = ['topping', 'добавка', 'топпинг', 'сыр', 'грибы', 'оливки']
+    if any(word in text_lower for word in topping_keywords) and any(word in text_lower for word in ['добавь', 'добавить']):
+        return 'addTopping'
     
-    for token in doc:
-        if token.dep_ == 'dobj':
-            verb = token.head.text.lower()
-            dobj = token.text.lower()
-            
-            verb_list = [('order', 'want', 'give', 'make', 'need'),
-                        ('show', 'find', 'display', 'see')]
-            dobj_list = [('pizza', 'pie', 'dish'),
-                        ('cola', 'soda', 'drink', 'beverage'),
-                        ('dessert', 'sweet', 'cake')]
-            
-            verb_syns = [item for item in verb_list if verb in item]
-            dobj_syns = [item for item in dobj_list if dobj in item]
-            
-            if verb_syns and dobj_syns:
-                return f"{verb_syns[0][0]}{dobj_syns[0][0].capitalize()}"
-    
+    # Если есть слова "хочу", "давай", "закажи"
+    want_words = ['хочу', 'давай', 'закажи', 'want', 'order', 'give me']
     if any(word in text_lower for word in want_words):
         return 'wantSomething'
     
@@ -326,89 +272,6 @@ def format_drink_menu():
     menu_text += "Напишите 'хочу колу', 'давай пепси' или просто 'кола 0.5л'"
     return menu_text
 
-def detect_language(text):
-    """Определяет язык текста"""
-    ru_count = len(re.findall(r'[а-яА-ЯёЁ]', text))
-    en_count = len(re.findall(r'[a-zA-Z]', text))
-    return 'ru' if ru_count > en_count else 'en'
-
-def extract_keyphrase(text, lang, user_id=None):
-    """Извлекает ключевую фразу для энциклопедии"""
-    text_lower = text.lower().strip()
-    
-    if text_lower.endswith('?') and 'вопросительный знак' not in text_lower:
-        text_lower = text_lower.rstrip('?').strip()
-    
-    if user_id and user_id in user_context:
-        context = user_context[user_id]
-        last_photo = context.get('last_photo_object')
-        
-        if last_photo:
-            if any(word in text_lower for word in ['какое именно', 'какой именно', 'что именно', 'конкретно', 'точнее']):
-                return f"specific:{last_photo}"
-            
-            if any(word in text_lower for word in ['какое это', 'что это за', 'это кто', 'кто это', 'а это']):
-                return last_photo
-    
-    time_pattern = r'\b\d{1,2}:\d{2}\b'
-    if re.search(time_pattern, text):
-        return "time"
-    
-    if re.search(r'\b1617\b', text):
-        return "1617 number"
-    
-    if 'вопросительный знак' in text_lower or ('?' in text and 'что такое' in text_lower):
-        return "question mark"
-    
-    if any(x in text_lower for x in ['кто на фото', 'что на фото', 'что изображено']):
-        return "photo question"
-    
-    if lang == 'ru':
-        if 'как спят дельфины' in text_lower:
-            return "dolphin sleep"
-        
-        words = text_lower.split()
-        for word in words:
-            if word in RUSSIAN_TO_ENGLISH:
-                return RUSSIAN_TO_ENGLISH[word]
-        
-        if 'хомяк' in text_lower:
-            return "hamster"
-        elif 'ежик' in text_lower or 'ёжик' in text_lower:
-            return "hedgehog"
-        elif 'собака' in text_lower:
-            return "dog"
-        elif 'кошка' in text_lower or 'кот' in text_lower:
-            return "cat"
-        elif 'слон' in text_lower:
-            return "elephant"
-        elif 'дельфин' in text_lower:
-            return "dolphin"
-        elif 'лев' in text_lower:
-            return "lion"
-        elif 'тигр' in text_lower:
-            return "tiger"
-        elif 'млекопитающ' in text_lower:
-            return "mammal"
-        elif 'ии' in text_lower or 'искусственный интеллект' in text_lower:
-            return "artificial intelligence"
-    
-    else:
-        if 'how do dolphins sleep' in text_lower or 'dolphins sleep' in text_lower:
-            return "dolphin sleep"
-        
-        words = text_lower.split()
-        for word in words:
-            if word in ['hamster', 'hedgehog', 'dog', 'cat', 'elephant', 'dolphin', 'lion', 'tiger', 'mammal']:
-                return word
-        
-        if 'artificial intelligence' in text_lower or ' ai ' in text_lower:
-            return "artificial intelligence"
-        elif 'question mark' in text_lower:
-            return "question mark"
-    
-    return None
-
 def search_wikipedia(query, lang='en'):
     """Ищет информацию в Википедии"""
     try:
@@ -519,13 +382,12 @@ def analyze_image_clarifai(filename):
         return "ошибка анализа", []
 
 
-def start(update: Update, context: CallbackContext):
+async def start(update: Update, context: CallbackContext):
     """Обработчик команды /start"""
     user_id = update.message.from_user.id
     user_context[user_id] = {'last_photo_object': None, 'all_detected_objects': []}
     
     welcome_text = """
-    *УНИВЕРСАЛЬНЫЙ TELEGRAM БОТ*
     
     🍕 *Заказ еды:*
     • Я голоден / I'm hungry
@@ -548,13 +410,13 @@ def start(update: Update, context: CallbackContext):
     
     🐹 *Пишите что хотите - бот поймет!*
     """
-    update.message.reply_text(welcome_text, parse_mode='Markdown')
+    await update.message.reply_text(welcome_text, parse_mode='Markdown')
     logger.info(f"Пользователь {user_id} начал диалог")
 
-def help_command(update: Update, context: CallbackContext):
+async def help_command(update: Update, context: CallbackContext):
     """Обработчик команды /help"""
     help_text = """
-    *ПОМОЩЬ ПО КОМАНДАМ*
+    🆘 *ПОМОЩЬ ПО КОМАНДАМ*
     
     🍕 *Заказ еды:*
     Просто напишите что хотите:
@@ -585,19 +447,19 @@ def help_command(update: Update, context: CallbackContext):
     • "давай пиццу и кофе"
     • "что такое хомяк?"
     """
-    update.message.reply_text(help_text, parse_mode='Markdown')
+    await update.message.reply_text(help_text, parse_mode='Markdown')
 
-def menu_command(update: Update, context: CallbackContext):
+async def menu_command(update: Update, context: CallbackContext):
     """Команда /menu для показа меню"""
-    update.message.reply_text(format_pizza_menu(), parse_mode='Markdown')
+    await update.message.reply_text(format_pizza_menu(), parse_mode='Markdown')
     time.sleep(0.5)
-    update.message.reply_text(format_toppings_menu(), parse_mode='Markdown')
+    await update.message.reply_text(format_toppings_menu(), parse_mode='Markdown')
     time.sleep(0.5)
-    update.message.reply_text(format_desserts_menu(), parse_mode='Markdown')
+    await update.message.reply_text(format_desserts_menu(), parse_mode='Markdown')
     time.sleep(0.5)
-    update.message.reply_text(format_drink_menu(), parse_mode='Markdown')
+    await update.message.reply_text(format_drink_menu(), parse_mode='Markdown')
 
-def debug_command(update: Update, context: CallbackContext):
+async def debug_command(update: Update, context: CallbackContext):
     """Команда /debug для отладки"""
     user_id = update.message.from_user.id
     
@@ -622,37 +484,33 @@ def debug_command(update: Update, context: CallbackContext):
     ]
     
     for phrase in test_phrases:
-        doc = nlp(phrase.lower())
-        intent = extract_intent_improved(doc)
+        intent = extract_intent_simple(phrase)
         debug_text += f"`{phrase}` → `{intent}`\n"
     
-    update.message.reply_text(debug_text, parse_mode='Markdown')
+    await update.message.reply_text(debug_text, parse_mode='Markdown')
 
-def handle_text_message(update: Update, context: CallbackContext):
+async def handle_text_message(update: Update, context: CallbackContext):
     """Обработчик текстовых сообщений"""
     user_id = update.message.from_user.id
     user_text = update.message.text
     
-    print(f"\n ПОЛЬЗОВАТЕЛЬ [{user_id}]: {user_text}")
-    print(f" Время: {datetime.now().strftime('%H:%M:%S')}")
+    print(f"\n📨 ПОЛЬЗОВАТЕЛЬ [{user_id}]: {user_text}")
+    print(f"⏰ Время: {datetime.now().strftime('%H:%M:%S')}")
     
     # Инициализация контекста если нужно
     if user_id not in user_context:
         user_context[user_id] = {'last_photo_object': None, 'all_detected_objects': []}
     
     # Проверяем, не относится ли сообщение к заказу еды
-    doc = nlp(user_text.lower())
-    intent = extract_intent_improved(doc)
+    intent = extract_intent_simple(user_text)
     
-    if intent in ['hungry', 'orderPizza', 'showPizza', 'orderDessert', 'showDesserts', 
-                  'order_кола', 'order_пепси', 'order_кофе', 'order_чай', 
-                  'addTopping', 'wantSomething']:
+    if intent in ['hungry', 'orderPizza', 'orderDessert', 'addTopping', 'wantSomething'] or (intent and intent.startswith('order_')):
         
-        print(f"🍕 Обнаружено намерение заказа еды: {intent}")
+        print(f"🍕 Обнаружено намерение: {intent}")
         
         # Обработка заказа еды
         if intent == 'hungry':
-            update.message.reply_text(get_hungry_response(), parse_mode='Markdown')
+            await update.message.reply_text(get_hungry_response(), parse_mode='Markdown')
             user_states[user_id] = 'ORDERING'
             user_data[user_id] = {}
             
@@ -666,12 +524,12 @@ def handle_text_message(update: Update, context: CallbackContext):
                 "*Просто напишите название пиццы, которую хотите:*\n"
                 "(например: 'пепперони', 'маргарита', 'гавайская')"
             )
-            update.message.reply_text(response, parse_mode='Markdown')
+            await update.message.reply_text(response, parse_mode='Markdown')
             
-        elif intent.startswith('order_'):
+        elif intent and intent.startswith('order_'):
             drink_keyword = intent[6:]
             if drink_keyword in DRINK_MENU:
-                update.message.reply_text(
+                await update.message.reply_text(
                     f"🥤 *Хотите {drink_keyword}!*\n\n"
                     f"Напишите какой размер:\n"
                     f"{', '.join(DRINK_MENU[drink_keyword]['sizes'].keys())}",
@@ -680,18 +538,15 @@ def handle_text_message(update: Update, context: CallbackContext):
                 user_states[user_id] = 'ADD_INFO_DRINK_SIZE'
                 user_data[user_id] = {'drink_type': drink_keyword}
             else:
-                update.message.reply_text("Не понял какой напиток вы хотите. Используйте /menu чтобы посмотреть меню напитков.")
+                await update.message.reply_text("Не понял какой напиток вы хотите. Используйте /menu чтобы посмотреть меню напитков.")
             
-        elif intent == 'showPizza':
-            update.message.reply_text(format_pizza_menu(), parse_mode='Markdown')
-            
-        elif intent == 'orderDessert' or intent == 'showDesserts':
-            update.message.reply_text(format_desserts_menu(), parse_mode='Markdown')
+        elif intent == 'orderDessert':
+            await update.message.reply_text(format_desserts_menu(), parse_mode='Markdown')
             user_states[user_id] = 'ADD_INFO_DESSERT'
             user_data[user_id] = {'intent': 'orderDessert'}
             
         else:
-            update.message.reply_text(
+            await update.message.reply_text(
                 "Попробуйте сказать:\n"
                 "• 'Я голоден' или 'Хочу есть'\n"
                 "• 'Хочу пиццу' или просто 'пепперони'\n"
@@ -704,21 +559,66 @@ def handle_text_message(update: Update, context: CallbackContext):
         return
     
     # Если это не заказ еды, то обрабатываем как энциклопедический запрос
-    lang = detect_language(user_text)
-    print(f" Язык: {lang.upper()}")
+    text_lower = user_text.lower()
     
-    key_phrase = extract_keyphrase(user_text, lang, user_id)
+    # Простая проверка русских символов для определения языка
+    ru_count = len(re.findall(r'[а-яА-ЯёЁ]', user_text))
+    en_count = len(re.findall(r'[a-zA-Z]', user_text))
+    lang = 'ru' if ru_count > en_count else 'en'
+    
+    print(f"🌐 Язык: {lang.upper()}")
+    
+    # Простой извлечение ключевой фразы
+    key_phrase = None
+    
+    if 'время' in text_lower or 'time' in text_lower:
+        key_phrase = "time"
+    elif '1617' in text_lower:
+        key_phrase = "1617 number"
+    elif 'вопросительный знак' in text_lower or ('?' in user_text and 'что такое' in text_lower):
+        key_phrase = "вопросительный знак"
+    elif 'как спят дельфины' in text_lower or 'dolphins sleep' in text_lower:
+        key_phrase = "dolphin sleep"
+    elif 'кто на фото' in text_lower or 'что на фото' in text_lower:
+        key_phrase = "photo question"
+    elif 'хомяк' in text_lower:
+        key_phrase = "хомяк"
+    elif 'ежик' in text_lower or 'ёжик' in text_lower:
+        key_phrase = "ежик"
+    elif 'собака' in text_lower:
+        key_phrase = "собака"
+    elif 'кошка' in text_lower or 'кот' in text_lower:
+        key_phrase = "кошка"
+    elif 'слон' in text_lower:
+        key_phrase = "слон"
+    elif 'дельфин' in text_lower:
+        key_phrase = "дельфин"
+    elif 'лев' in text_lower:
+        key_phrase = "лев"
+    elif 'тигр' in text_lower:
+        key_phrase = "тигр"
+    elif 'млекопитающ' in text_lower:
+        key_phrase = "млекопитающее"
+    elif 'ии' in text_lower or 'искусственный интеллект' in text_lower:
+        key_phrase = "ии"
     
     if not key_phrase:
-        update.message.reply_text("Не понял ваш запрос. Пожалуйста, уточните вопрос.")
-        print(f" Не удалось извлечь ключевую фразу")
+        # Если не нашли ключевую фразу, ищем в русских описаниях
+        for phrase in RUSSIAN_DESCRIPTIONS.keys():
+            if phrase in text_lower:
+                key_phrase = phrase
+                break
+    
+    if not key_phrase:
+        await update.message.reply_text("Не понял ваш запрос. Пожалуйста, уточните вопрос.")
+        print(f"❌ Не удалось извлечь ключевую фразу")
         return
     
-    print(f" Ключевая фраза: '{key_phrase}'")
+    print(f"🔑 Ключевая фраза: '{key_phrase}'")
     
     if key_phrase == "time":
         current_time = datetime.now().strftime("%H:%M")
-        update.message.reply_text(f"⏰ Текущее время: {current_time}")
+        await update.message.reply_text(f"⏰ Текущее время: {current_time}")
         print(f"⏰ Ответ: {current_time}")
         return
     
@@ -729,32 +629,32 @@ def handle_text_message(update: Update, context: CallbackContext):
         animal = key_phrase.split(":")[1]
         search_indicator = f"🔍 *Уточняю информацию о:* {animal}"
     
-    update.message.reply_text(search_indicator, parse_mode='Markdown')
+    await update.message.reply_text(search_indicator, parse_mode='Markdown')
     
     result = search_wikipedia(key_phrase, search_lang)
     
     print(f"📖 Результат: {result[:100]}...")
     
-    update.message.reply_text(result, parse_mode='Markdown')
+    await update.message.reply_text(result, parse_mode='Markdown')
 
-def handle_photo_message(update: Update, context: CallbackContext):
+async def handle_photo_message(update: Update, context: CallbackContext):
     """Обработчик фотографий"""
     user_id = update.message.from_user.id
     
     print(f"\n📸 ПОЛЬЗОВАТЕЛЬ [{user_id}]: отправил фото")
     print(f"⏰ Время: {datetime.now().strftime('%H:%M:%S')}")
     
-    update.message.reply_text("📸 *Анализирую изображение...*", parse_mode='Markdown')
+    await update.message.reply_text("📸 *Анализирую изображение...*", parse_mode='Markdown')
     
     temp_dir = Path(tempfile.gettempdir()) / "bot_images"
     temp_dir.mkdir(exist_ok=True)
     
     try:
-        photo_file = update.message.photo[-1].get_file()
+        photo_file = await update.message.photo[-1].get_file()
         filename = temp_dir / f"photo_{user_id}_{datetime.now().strftime('%H%M%S')}.jpg"
         
         print(f"💾 Скачиваю фото: {filename}")
-        photo_file.download(str(filename))
+        await photo_file.download_to_drive(filename)
         
         file_size = os.path.getsize(filename) / 1024
         print(f"📊 Размер файла: {file_size:.1f} KB")
@@ -773,12 +673,12 @@ def handle_photo_message(update: Update, context: CallbackContext):
             pass
         
         if main_object.startswith("ошибка"):
-            update.message.reply_text(f"❌ {main_object}")
+            await update.message.reply_text(f"❌ {main_object}")
             print(f"❌ Ошибка распознавания")
             return
         
         if main_object == "неизвестный объект":
-            update.message.reply_text("🤔 Не удалось распознать объекты на фото. Попробуйте другое изображение с более четким объектом.")
+            await update.message.reply_text("🤔 Не удалось распознать объекты на фото. Попробуйте другое изображение с более четким объектом.")
             print(f"🤔 Неизвестный объект")
             return
         
@@ -803,45 +703,48 @@ def handle_photo_message(update: Update, context: CallbackContext):
         
         print(f"📤 Отправляю ответ")
         
-        update.message.reply_text(response_text, parse_mode='Markdown')
+        await update.message.reply_text(response_text, parse_mode='Markdown')
         
     except Exception as e:
         print(f"❌ Ошибка: {e}")
-        update.message.reply_text("❌ Ошибка при обработке изображения")
+        await update.message.reply_text("❌ Ошибка при обработке изображения")
         logger.error(f"Ошибка обработки фото: {e}")
 
-def error_handler(update: Update, context: CallbackContext):
+async def error_handler(update: Update, context: CallbackContext):
     """Обработчик ошибок"""
     logger.error(f"Ошибка: {context.error}")
     
     try:
-        update.message.reply_text(f"❌ Произошла ошибка: {context.error}")
+        await update.message.reply_text(f"❌ Произошла ошибка: {context.error}")
     except:
         pass
 
+
 def main():
+    """Запуск бота"""
+    
     print("\n Журнал работы:")
     
     # Проверяем токен
     if not TELEGRAM_TOKEN or TELEGRAM_TOKEN == "8230051824:AAH8k81yxhlUNTO-th6SoNMXbXwENYdlmao":
+        print("Замените TELEGRAM_TOKEN в файле bot_light.py на свой токен")
     
     try:
-        # Создаем updater (python-telegram-bot==22.5)
-        updater = Updater(token=TELEGRAM_TOKEN, use_context=True)
-        dispatcher = updater.dispatcher
+        # Создаем Application (python-telegram-bot==22.5)
+        application = Application.builder().token(TELEGRAM_TOKEN).build()
         
         # Добавляем обработчики команд
-        dispatcher.add_handler(CommandHandler("start", start))
-        dispatcher.add_handler(CommandHandler("help", help_command))
-        dispatcher.add_handler(CommandHandler("menu", menu_command))
-        dispatcher.add_handler(CommandHandler("debug", debug_command))
+        application.add_handler(CommandHandler("start", start))
+        application.add_handler(CommandHandler("help", help_command))
+        application.add_handler(CommandHandler("menu", menu_command))
+        application.add_handler(CommandHandler("debug", debug_command))
         
         # Обработчики сообщений
-        dispatcher.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_text_message))
-        dispatcher.add_handler(MessageHandler(Filters.photo, handle_photo_message))
+        application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_message))
+        application.add_handler(MessageHandler(filters.PHOTO, handle_photo_message))
         
         # Обработчик ошибок
-        dispatcher.add_error_handler(error_handler)
+        application.add_error_handler(error_handler)
         
         print("✅ Бот запущен успешно!")
         print("📱 Команды бота:")
@@ -855,13 +758,10 @@ def main():
         print("   • 'Давай колу 0.5л'")
         print("   • 'Кто такие дельфины?'")
         print("\n⏹️ Для остановки: Ctrl+C")
+        print("-" * 40)
         
         # Запускаем бота
-        updater.start_polling()
-        print(" Бот подключен к Telegram API")
-        print(" Ожидаю сообщений...")
-        
-        updater.idle()
+        application.run_polling()
         
     except Exception as e:
         print(f"\n КРИТИЧЕСКАЯ ОШИБКА: {e}")
